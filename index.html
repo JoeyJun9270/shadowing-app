@@ -41,7 +41,9 @@
       font-size: 17px; font-weight: 800;
       background: linear-gradient(120deg, var(--primary), var(--accent));
       -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+      cursor: pointer; user-select: none;
     }
+    header h1:active { opacity: .7; }
     #settings-toggle {
       background: none; border: 1px solid var(--border);
       color: var(--muted); font-size: 13px;
@@ -133,7 +135,7 @@
 
     /* ── Sentence Area ── */
     #sentence-area {
-      display: block;
+      display: none;
       padding: 12px 16px;
       text-align: center;
       min-height: 100px;
@@ -234,7 +236,7 @@
 <body>
 
 <header>
-  <h1>🎤 YouTube Shadowing</h1>
+  <h1 onclick="goHome()">🎤 YouTube Shadowing</h1>
   <button id="settings-toggle" onclick="toggleSettings()">⚙ 설정</button>
 </header>
 
@@ -333,6 +335,11 @@ document.addEventListener('DOMContentLoaded', () => {
     if (e.key === 'Enter') handleLoad();
   });
   buildPips();
+  // 초기 history entry 설정 (뒤로가기로 홈 복귀 가능하게)
+  history.replaceState({ screen: 'home' }, '');
+  window.addEventListener('popstate', e => {
+    if (e.state?.screen === 'home') goHome();
+  });
 });
 
 function onYouTubeIframeAPIReady() {
@@ -444,6 +451,7 @@ async function handleLoad() {
       warn.classList.add('show');
     } else { warn.classList.remove('show'); }
 
+    history.pushState({ screen: 'player', videoId: vid }, '', `?v=${vid}`);
     showPlayerUI();
     renderSentence();
     showToast(`자막 ${subs.length}개 로드 완료`);
@@ -597,9 +605,26 @@ function showPlayerUI() {
   document.getElementById('url-section').style.display = 'none';
   document.getElementById('rec-section').style.display = 'none';
   document.getElementById('player-wrap').style.display = 'block';
+  document.getElementById('sentence-area').style.display = 'block';
   document.getElementById('status-bar').style.display = 'flex';
   document.getElementById('controls').style.display = 'flex';
   document.getElementById('bottom-section').style.display = 'block';
+}
+
+function goHome() {
+  stopWatch();
+  appState = 'idle'; subs = []; idx = 0; rptDone = 0; pendingStart = null;
+  if (playerReady) { player.pauseVideo(); }
+  document.getElementById('player-wrap').style.display = 'none';
+  document.getElementById('sentence-area').style.display = 'none';
+  document.getElementById('status-bar').style.display = 'none';
+  document.getElementById('controls').style.display = 'none';
+  document.getElementById('bottom-section').style.display = 'none';
+  document.getElementById('lang-warn').classList.remove('show');
+  document.getElementById('url-section').style.display = 'block';
+  document.getElementById('rec-section').style.display = 'block';
+  document.getElementById('url-input').value = '';
+  history.replaceState({ screen: 'home' }, '', location.pathname);
 }
 
 function setLoading(on, msg) {
