@@ -1,19 +1,28 @@
 import express from 'express';
-import { createRequire } from 'module';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
-import { YoutubeTranscript } from 'youtube-transcript/dist/youtube-transcript.esm.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const app = express();
-const PORT = 3000;
+const PORT = process.env.PORT || 3000;
 
 app.use(express.static(__dirname));
 
-// 문장 부호 기준으로 세그먼트 병합
+function parseJson3(data) {
+  if (!data?.events) return [];
+  return data.events
+    .filter(e => e.segs)
+    .map(e => ({
+      start: e.tStartMs / 1000,
+      end:   (e.tStartMs + Math.max(e.dDurationMs || 1000, 300)) / 1000,
+      text:  e.segs.map(s => s.utf8 || '').join('').replace(/\n/g, ' ').trim(),
+    }))
+    .filter(s => s.text.length > 0);
+}
+
 function groupSubtitles(items) {
-  const MIN_DUR = 1.5; // 이보다 짧으면 다음 세그먼트와 합침
-  const MAX_DUR = 15;  // 이보다 길면 강제 끊기
+  const MIN_DUR = 1.5;
+  const MAX_DUR = 15;
   const groups = [];
   let buf = [];
 
@@ -29,58 +38,83 @@ function groupSubtitles(items) {
 
   for (let i = 0; i < items.length; i++) {
     buf.push(items[i]);
-    const dur = buf[buf.length - 1].end - buf[0].start;
+    const dur  = buf[buf.length - 1].end - buf[0].start;
     const text = buf.map(s => s.text).join(' ').trimEnd();
     const endsOnSentence = /[.?!]["')\]]?$/.test(text);
 
-    if (dur >= MAX_DUR) {
-      flush();
-    } else if (endsOnSentence && dur >= MIN_DUR) {
-      flush();
-    }
+    if (dur >= MAX_DUR)                        flush();
+    else if (endsOnSentence && dur >= MIN_DUR) flush();
   }
   flush();
   return groups;
 }
 
 app.get('/api/transcript', async (req, res) => {
-  const { videoId } = req.query;
+  const { videoId, apiKey } = req.query;
+
   if (!videoId) {
     return res.status(400).json({ error: 'videoId 파라미터가 필요합니다' });
+  }
+  if (!apiKey) {
+    return res.status(400).json({ error: 'API Key가 없습니다. 설정에서 YouTube API Key를 입력해주세요.' });
   }
 
   console.log(`[API] Fetching transcript for: ${videoId}`);
 
   try {
-    // 영어 자막 우선, 없으면 첫 번째 자막 사용
-    let items = null;
-    try {
-      items = await YoutubeTranscript.fetchTranscript(videoId, { lang: 'en' });
-    } catch (_) {
-      items = await YoutubeTranscript.fetchTranscript(videoId);
+    // 1. YouTube Data API v3 — captions.list로 트랙 목록 조회
+    const listUrl = `https://www.googleapis.com/youtube/v3/captions?part=snippet&videoId=${videoId}&key=${apiKey}`;
+    const listRes = await fetch(listUrl, { signal: AbortSignal.timeout(10000) });
+    const listData = await listRes.json();
+
+    if (listData.error) {
+      console.error('[API] captions.list error:', listData.error.message);
+      throw new Error(`YouTube API 오류: ${listData.error.message}`);
     }
 
-    if (!items || items.length === 0) {
-      return res.status(404).json({ error: '자막을 찾을 수 없습니다' });
+    const tracks = listData.items || [];
+    console.log(`[API] Found ${tracks.length} caption tracks`);
+
+    if (!tracks.length) {
+      return res.status(404).json({ error: '자막을 찾을 수 없습니다 (이 영상에 자막이 없거나 비공개입니다)' });
     }
 
-    // youtube-transcript: { text, duration(ms), offset(ms) }
-    const raw = items.map(item => ({
-      start: item.offset / 1000,
-      end:   (item.offset + Math.max(item.duration || 1000, 300)) / 1000,
-      text:  item.text.replace(/\n/g, ' ').trim(),
-    })).filter(s => s.text.length > 0);
+    // 영어 트랙 우선, 없으면 첫 번째 트랙 사용
+    const selected =
+      tracks.find(t => t.snippet.language === 'en') ||
+      tracks.find(t => t.snippet.language?.startsWith('en')) ||
+      tracks[0];
+
+    const lang  = selected.snippet.language;
+    const isAsr = selected.snippet.trackKind === 'ASR';
+    console.log(`[API] Selected track: lang=${lang}, kind=${selected.snippet.trackKind}`);
+
+    // 2. timedtext URL로 자막 내용 서버에서 직접 fetch (CORS 없음)
+    const params = new URLSearchParams({ v: videoId, lang, fmt: 'json3' });
+    if (isAsr) params.set('kind', 'asr');
+    const timedtextUrl = `https://www.youtube.com/api/timedtext?${params}`;
+
+    console.log(`[API] Fetching timedtext: ${timedtextUrl}`);
+    const subRes = await fetch(timedtextUrl, { signal: AbortSignal.timeout(10000) });
+
+    if (!subRes.ok) {
+      throw new Error(`timedtext 요청 실패: HTTP ${subRes.status}`);
+    }
+
+    const subData = await subRes.json();
+    const raw  = parseJson3(subData);
+
+    if (!raw.length) {
+      return res.status(404).json({ error: '자막 내용을 파싱할 수 없습니다' });
+    }
 
     const subs = groupSubtitles(raw);
-
     console.log(`[API] Returning ${subs.length} segments`);
     res.json({ subs });
+
   } catch (err) {
     console.error('[API] Error:', err.message);
-    const msg = err.message.includes('Could not find') || err.message.includes('No transcripts')
-      ? '이 영상에는 자막이 없거나 비활성화되어 있습니다'
-      : err.message;
-    res.status(500).json({ error: msg });
+    res.status(500).json({ error: err.message });
   }
 });
 

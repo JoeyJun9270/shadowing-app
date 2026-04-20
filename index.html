@@ -56,7 +56,7 @@
       transition: max-height 0.3s ease;
       flex-shrink: 0;
     }
-    #settings-panel.open { max-height: 140px; }
+    #settings-panel.open { max-height: 160px; }
     .panel-inner { padding: 13px 14px; }
     .field-label { font-size: 12px; color: var(--muted); margin-bottom: 7px; }
     .note { font-size: 11px; color: var(--muted); margin-top: 7px; }
@@ -239,7 +239,12 @@
 
 <div id="settings-panel">
   <div class="panel-inner">
-    <div class="note">자막은 로컬 서버(localhost:3000)를 통해 가져옵니다. API Key 불필요.</div>
+    <div class="field-label">YouTube Data API Key</div>
+    <div class="row">
+      <input type="password" id="api-key-input" placeholder="AIza..." autocomplete="off" autocorrect="off" spellcheck="false">
+      <button class="btn btn-p" onclick="saveKey()">저장</button>
+    </div>
+    <div class="note">브라우저 localStorage에만 저장 · <a href="https://console.cloud.google.com/" target="_blank" style="color:var(--primary)">Google Cloud Console</a>에서 발급</div>
   </div>
 </div>
 
@@ -328,6 +333,12 @@ let timerId = null;
 
 // ── Boot ───────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
+  const k = localStorage.getItem('yt_api_key');
+  if (k) {
+    document.getElementById('api-key-input').value = k;
+  } else {
+    document.getElementById('settings-panel').classList.add('open');
+  }
   document.getElementById('url-input').addEventListener('keydown', e => {
     if (e.key === 'Enter') handleLoad();
   });
@@ -381,6 +392,13 @@ function onYouTubeIframeAPIReady() {
 function toggleSettings() {
   document.getElementById('settings-panel').classList.toggle('open');
 }
+function saveKey() {
+  const v = document.getElementById('api-key-input').value.trim();
+  if (v) { localStorage.setItem('yt_api_key', v); showToast('API Key 저장됨'); }
+  else   { localStorage.removeItem('yt_api_key'); showToast('API Key 삭제됨'); }
+  document.getElementById('settings-panel').classList.remove('open');
+}
+const getKey = () => localStorage.getItem('yt_api_key') || '';
 
 // ── Recommended Videos ────────────────────────────
 function loadRec(videoId) {
@@ -447,10 +465,12 @@ async function handleLoad() {
 
 // ── Subtitle Fetching ──────────────────────────────
 async function fetchSubs(vid) {
-  console.log(`[Subs] Requesting /api/transcript?videoId=${vid}`);
-  const r = await fetch(`/api/transcript?videoId=${vid}`, {
-    signal: AbortSignal.timeout(20000)
-  });
+  const apiKey = getKey();
+  if (!apiKey) throw new Error('API Key가 없습니다. 설정에서 YouTube API Key를 입력해주세요.');
+
+  const url = `/api/transcript?videoId=${vid}&apiKey=${encodeURIComponent(apiKey)}`;
+  console.log(`[Subs] Requesting transcript for ${vid}`);
+  const r = await fetch(url, { signal: AbortSignal.timeout(25000) });
   const data = await r.json();
   if (!r.ok) {
     console.error('[Subs] Server error:', data.error);
