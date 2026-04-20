@@ -58,18 +58,23 @@ app.get('/api/transcript', async (req, res) => {
     }
 
     const data = await r.json();
+    console.log(`[API] Response keys: ${Object.keys(data).join(', ')}`);
     const transcript = data.transcript ?? data.content ?? [];
 
     if (!transcript.length) {
       return res.status(404).json({ error: '자막을 찾을 수 없습니다' });
     }
 
-    // Supadata 형식: { text, start(s), duration(s) }
+    console.log(`[API] Total items: ${transcript.length}`);
+    console.log(`[API] First 3 raw:`, JSON.stringify(transcript.slice(0, 3)));
+
     const raw = transcript.map(item => ({
       start: item.start,
       end:   item.start + Math.max(item.duration || 1, 0.3),
       text:  item.text.replace(/\n/g, ' ').trim(),
     })).filter(s => s.text.length > 0);
+
+    console.log(`[API] First 3 mapped:`, JSON.stringify(raw.slice(0, 3)));
 
     const subs = groupSubtitles(raw);
     console.log(`[API] Returning ${subs.length} segments`);
