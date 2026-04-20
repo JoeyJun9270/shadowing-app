@@ -499,13 +499,32 @@ function groupSubtitles(items) {
   return groups;
 }
 
+const PROXIES = [
+  'https://api.allorigins.win/raw?url=',
+  'https://corsproxy.io/?url=',
+  'https://proxy.cors.sh/',
+  'https://cors-anywhere.herokuapp.com/'
+];
+
 async function proxyFetch(url) {
-  // corsproxy.io 로 브라우저에서 직접 fetch (Railway IP 우회)
-  const proxy = `https://corsproxy.io/?url=${encodeURIComponent(url)}`;
   console.log('[Subs] proxy fetch:', url.slice(0, 80));
-  const r = await fetch(proxy, { signal: AbortSignal.timeout(15000) });
-  if (!r.ok) throw new Error(`프록시 HTTP ${r.status}`);
-  return r.text();
+  for (const proxy of PROXIES) {
+    try {
+      const res = await fetch(proxy + encodeURIComponent(url), {
+        signal: AbortSignal.timeout(8000)
+      });
+      if (res.ok) {
+        const text = await res.text();
+        if (text && text.length > 10) {
+          console.log('[Subs] proxy OK:', proxy.slice(8, 40));
+          return text;
+        }
+      }
+    } catch (e) {
+      console.warn('[Subs] Proxy failed:', proxy.slice(8, 40), e.message);
+    }
+  }
+  throw new Error('모든 프록시 실패');
 }
 
 async function fetchSubs(vid) {
