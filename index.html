@@ -1,0 +1,609 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="theme-color" content="#111111">
+  <title>YouTube Shadowing</title>
+  <style>
+    :root {
+      --bg: #111;
+      --surface: #1c1c2e;
+      --primary: #7c6af7;
+      --accent: #f87171;
+      --success: #34d399;
+      --warn: #fbbf24;
+      --text: #f1f1f1;
+      --muted: #777;
+      --border: #2a2a3e;
+      --r: 10px;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100dvh;
+      display: flex;
+      flex-direction: column;
+      overflow: visible;
+    }
+
+    /* ── Header ── */
+    header {
+      position: sticky; top: 0; z-index: 50;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 10px 14px; flex-shrink: 0;
+    }
+    header h1 {
+      font-size: 17px; font-weight: 800;
+      background: linear-gradient(120deg, var(--primary), var(--accent));
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    }
+    #settings-toggle {
+      background: none; border: 1px solid var(--border);
+      color: var(--muted); font-size: 13px;
+      padding: 6px 12px; border-radius: 16px; cursor: pointer;
+    }
+
+    /* ── Settings Panel ── */
+    #settings-panel {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      overflow: hidden; max-height: 0;
+      transition: max-height 0.3s ease;
+      flex-shrink: 0;
+    }
+    #settings-panel.open { max-height: 140px; }
+    .panel-inner { padding: 13px 14px; }
+    .field-label { font-size: 12px; color: var(--muted); margin-bottom: 7px; }
+    .note { font-size: 11px; color: var(--muted); margin-top: 7px; }
+
+    /* ── Inputs & Buttons ── */
+    .row { display: flex; gap: 8px; }
+    input {
+      flex: 1; min-width: 0;
+      background: var(--bg); border: 1px solid var(--border);
+      color: var(--text); padding: 11px 13px;
+      border-radius: var(--r); font-size: 14px; outline: none;
+    }
+    input:focus { border-color: var(--primary); }
+    .btn {
+      padding: 11px 16px; border-radius: var(--r);
+      border: none; font-size: 14px; font-weight: 600;
+      cursor: pointer; white-space: nowrap;
+      transition: opacity .15s, transform .1s;
+    }
+    .btn:active { transform: scale(0.96); opacity: .85; }
+    .btn-p  { background: var(--primary); color: #fff; }
+    .btn-g  { background: var(--border);  color: var(--text); }
+    .btn-a  { background: var(--accent);  color: #fff; }
+    .btn-s  { background: var(--success); color: #111; }
+
+    /* ── URL Section ── */
+    #url-section { padding: 12px; flex-shrink: 0; }
+
+    /* ── Recommended Videos ── */
+    #rec-section { padding: 0 12px 12px; flex-shrink: 0; }
+    .rec-label { font-size: 11px; color: var(--muted); text-transform: uppercase;
+      letter-spacing: .06em; margin-bottom: 8px; }
+    .rec-scroll {
+      display: flex; gap: 10px;
+      overflow-x: auto; -webkit-overflow-scrolling: touch;
+      scrollbar-width: none; padding-bottom: 2px;
+    }
+    .rec-scroll::-webkit-scrollbar { display: none; }
+    .rec-card {
+      flex: 0 0 calc(33.33% - 7px); min-width: 110px;
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--r); overflow: hidden; cursor: pointer;
+      transition: border-color .15s, transform .12s;
+    }
+    .rec-card:hover { border-color: var(--primary); transform: translateY(-2px); }
+    .rec-card:active { transform: scale(.97); }
+    .rec-thumb {
+      width: 100%; aspect-ratio: 16/9;
+      object-fit: cover; display: block; background: #000;
+    }
+    .rec-title {
+      font-size: 11px; line-height: 1.4; color: var(--text);
+      padding: 6px 8px 8px; display: -webkit-box;
+      -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+    }
+
+    /* ── Warning ── */
+    #lang-warn {
+      display: none; margin: 0 12px 8px;
+      background: rgba(251,191,36,.12);
+      border: 1px solid var(--warn); color: var(--warn);
+      padding: 9px 13px; border-radius: 8px; font-size: 13px;
+      flex-shrink: 0;
+    }
+    #lang-warn.show { display: block; }
+
+    /* ── Player ── */
+    #player-wrap {
+      width: 100%; aspect-ratio: 16/9;
+      background: #000; flex-shrink: 0;
+    }
+    #yt-player { width: 100%; height: 100%; }
+
+    /* ── Sentence Area ── */
+    #sentence-area {
+      display: block;
+      padding: 20px 16px;
+      text-align: center;
+      min-height: 120px;
+      overflow: visible;
+    }
+    #placeholder { color: var(--muted); font-size: 15px; }
+    #sentence-text {
+      font-size: clamp(16px, 5vw, 22px);
+      font-weight: 600;
+      line-height: 1.6;
+      display: none;
+      width: 100%;
+      word-break: break-word;
+      overflow-wrap: break-word;
+      white-space: pre-wrap;
+      overflow: visible;
+      max-height: none;
+      padding: 8px 0;
+    }
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateY(10px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    .fade-in { animation: fadeUp .25s ease; }
+
+    /* ── Status Bar ── */
+    #status-bar {
+      display: none; flex-shrink: 0;
+      padding: 8px 14px;
+      background: var(--surface);
+      border-top: 1px solid var(--border);
+      border-bottom: 1px solid var(--border);
+      align-items: center; justify-content: space-between; gap: 10px;
+    }
+    #status-text { font-size: 13px; color: var(--muted); display: flex; align-items: center; gap: 6px; }
+    .dots { display: flex; gap: 5px; flex-shrink: 0; }
+    .dot {
+      width: 9px; height: 9px; border-radius: 50%;
+      background: var(--border); transition: background .2s;
+    }
+    .dot.on { background: var(--primary); }
+
+    /* ── Controls ── */
+    #controls {
+      display: none; flex-shrink: 0;
+      padding: 12px; gap: 8px;
+    }
+    .btn-nav { flex: 0 0 64px; height: 52px; font-size: 14px; font-weight: 600; }
+    #play-btn { flex: 1; height: 52px; font-size: 15px; }
+
+    /* ── Bottom Section ── */
+    #bottom-section { display: none; padding: 0 12px 16px; flex-shrink: 0; }
+    .repeat-row { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+    .repeat-row label { font-size: 13px; color: var(--muted); white-space: nowrap; }
+    .pips { display: flex; gap: 6px; }
+    .pip {
+      width: 34px; height: 34px; border-radius: 50%;
+      border: 1px solid var(--border); background: none;
+      color: var(--muted); font-size: 13px; font-weight: 600; cursor: pointer;
+      transition: background .15s, color .15s, border-color .15s;
+    }
+    .pip.on { background: var(--primary); border-color: var(--primary); color: #fff; }
+    .prog-row { display: flex; align-items: center; gap: 10px; }
+    .prog-label { font-size: 12px; color: var(--muted); white-space: nowrap; }
+    .prog-track { flex: 1; height: 4px; background: var(--border); border-radius: 2px; overflow: hidden; }
+    #prog-fill { height: 100%; background: var(--primary); border-radius: 2px; width: 0; transition: width .3s ease; }
+
+    /* ── Loading ── */
+    #loading {
+      display: none; position: fixed; inset: 0;
+      background: rgba(0,0,0,.75); z-index: 100;
+      flex-direction: column; align-items: center; justify-content: center; gap: 14px;
+    }
+    #loading.show { display: flex; }
+    .spinner {
+      width: 38px; height: 38px;
+      border: 3px solid var(--border); border-top-color: var(--primary);
+      border-radius: 50%; animation: spin .75s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .loading-msg { font-size: 14px; color: var(--muted); }
+
+    /* ── Toast ── */
+    #toast {
+      position: fixed; bottom: 24px; left: 50%;
+      transform: translateX(-50%) translateY(70px);
+      background: #2a2a3e; color: var(--text);
+      padding: 9px 20px; border-radius: 20px;
+      font-size: 13px; z-index: 200;
+      transition: transform .25s ease;
+      pointer-events: none; white-space: nowrap;
+      border: 1px solid var(--border);
+    }
+    #toast.show { transform: translateX(-50%) translateY(0); }
+    .hidden { display: none !important; }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>🎤 YouTube Shadowing</h1>
+  <button id="settings-toggle" onclick="toggleSettings()">⚙ 설정</button>
+</header>
+
+<div id="settings-panel">
+  <div class="panel-inner">
+    <div class="note">자막은 로컬 서버(localhost:3000)를 통해 가져옵니다. API Key 불필요.</div>
+  </div>
+</div>
+
+<div id="url-section">
+  <div class="row">
+    <input type="text" id="url-input" inputmode="url" placeholder="YouTube URL 입력..."
+           autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
+    <button class="btn btn-p" onclick="handleLoad()">로드</button>
+  </div>
+</div>
+
+<div id="rec-section">
+  <div class="rec-label">추천 영상</div>
+  <div class="rec-scroll">
+    <div class="rec-card" onclick="loadRec('iCvmsMzlF7o')">
+      <img class="rec-thumb" src="https://img.youtube.com/vi/iCvmsMzlF7o/mqdefault.jpg" alt="" loading="lazy">
+      <div class="rec-title">The Power of Vulnerability — Brené Brown</div>
+    </div>
+    <div class="rec-card" onclick="loadRec('Ks-_Mh1QhMc')">
+      <img class="rec-thumb" src="https://img.youtube.com/vi/Ks-_Mh1QhMc/mqdefault.jpg" alt="" loading="lazy">
+      <div class="rec-title">Your Body Language May Shape Who You Are — Amy Cuddy</div>
+    </div>
+    <div class="rec-card" onclick="loadRec('qp0HIF3SfI4')">
+      <img class="rec-thumb" src="https://img.youtube.com/vi/qp0HIF3SfI4/mqdefault.jpg" alt="" loading="lazy">
+      <div class="rec-title">How great leaders inspire action — Simon Sinek</div>
+    </div>
+  </div>
+</div>
+
+<div id="lang-warn"></div>
+
+<div id="player-wrap">
+  <div id="yt-player"></div>
+</div>
+
+<div id="sentence-area">
+  <div id="placeholder">YouTube URL을 입력하고 로드하세요</div>
+  <div id="sentence-text"></div>
+</div>
+
+<div id="status-bar">
+  <div id="status-text">
+    <span id="s-icon">▶</span>
+    <span id="s-label">준비</span>
+  </div>
+  <div class="dots" id="dots"></div>
+</div>
+
+<div id="controls" class="row">
+  <button class="btn btn-g btn-nav" onclick="goPrev()">이전</button>
+  <button class="btn btn-p" id="play-btn" onclick="onPlayBtn()">▶ 재생</button>
+  <button class="btn btn-g btn-nav" onclick="goNext()">다음</button>
+</div>
+
+<div id="bottom-section">
+  <div class="repeat-row">
+    <label>반복 횟수:</label>
+    <div class="pips" id="pips"></div>
+  </div>
+  <div class="prog-row">
+    <span class="prog-label" id="prog-label">0 / 0</span>
+    <div class="prog-track"><div id="prog-fill"></div></div>
+  </div>
+</div>
+
+<div id="loading">
+  <div class="spinner"></div>
+  <div class="loading-msg" id="loading-msg">자막 불러오는 중...</div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+'use strict';
+
+// ── State ──────────────────────────────────────────
+let player = null, playerReady = false;
+let pendingVid = null;   // video to load once player is ready
+let pendingStart = null; // seek target; startWatch deferred until position confirmed
+let subs = [];        // [{start, end, text}]
+let idx = 0;          // current sentence
+let rptDone = 0;      // repeats completed
+let maxRpt = 3;
+let appState = 'idle'; // idle | playing | paused
+let timerId = null;
+
+// ── Boot ───────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', () => {
+  document.getElementById('url-input').addEventListener('keydown', e => {
+    if (e.key === 'Enter') handleLoad();
+  });
+  buildPips();
+});
+
+function onYouTubeIframeAPIReady() {
+  console.log('[Player] IFrame API ready, creating player...');
+  player = new YT.Player('yt-player', {
+    playerVars: { playsinline: 1, rel: 0, modestbranding: 1 },
+    events: {
+      onReady: () => {
+        playerReady = true;
+        console.log('[Player] Player ready');
+        if (pendingVid) {
+          console.log('[Player] Loading queued video:', pendingVid);
+          player.loadVideoById(pendingVid);
+          player.pauseVideo();
+          pendingVid = null;
+        }
+      },
+      onError: e => console.error('[Player] Error code:', e.data),
+      onStateChange: e => {
+        const states = { [-1]: 'unstarted', 0: 'ended', 1: 'playing', 2: 'paused', 3: 'buffering', 5: 'cued' };
+        console.log('[Player] State:', states[e.data] ?? e.data);
+        if (e.data === YT.PlayerState.PLAYING && appState === 'playing') {
+          if (pendingStart !== null) {
+            // seek 후 실제 재생 위치가 목표 지점에 도달했는지 확인 후 watch 시작
+            const target = pendingStart;
+            const check = () => {
+              if (player.getCurrentTime() >= target - 0.1) {
+                pendingStart = null;
+                startWatch();
+              } else {
+                setTimeout(check, 30);
+              }
+            };
+            check();
+          } else {
+            // 버퍼링 재개 등 seek 없이 PLAYING 재진입
+            startWatch();
+          }
+        }
+        if (e.data === YT.PlayerState.PAUSED && appState === 'playing') stopWatch();
+      }
+    }
+  });
+}
+
+// ── Settings ───────────────────────────────────────
+function toggleSettings() {
+  document.getElementById('settings-panel').classList.toggle('open');
+}
+
+// ── Recommended Videos ────────────────────────────
+function loadRec(videoId) {
+  document.getElementById('url-input').value = `https://www.youtube.com/watch?v=${videoId}`;
+  handleLoad();
+}
+
+// ── Load ───────────────────────────────────────────
+function parseVideoId(input) {
+  const patterns = [
+    /[?&]v=([a-zA-Z0-9_-]{11})/,
+    /youtu\.be\/([a-zA-Z0-9_-]{11})/,
+    /\/embed\/([a-zA-Z0-9_-]{11})/,
+    /\/shorts\/([a-zA-Z0-9_-]{11})/,
+    /^([a-zA-Z0-9_-]{11})$/
+  ];
+  for (const p of patterns) { const m = input.match(p); if (m) return m[1]; }
+  return null;
+}
+
+async function handleLoad() {
+  const url = document.getElementById('url-input').value.trim();
+  const vid = parseVideoId(url);
+  if (!vid) { showToast('올바른 YouTube URL이 아닙니다'); return; }
+
+  console.log(`[Load] Video ID: ${vid}`);
+  setLoading(true, '자막 불러오는 중...');
+  stopWatch(); appState = 'idle';
+
+  try {
+    if (playerReady) {
+      console.log('[Load] Player ready → loadVideoById');
+      player.loadVideoById(vid);
+      player.pauseVideo();
+    } else {
+      console.log('[Load] Player not ready yet → queuing video');
+      pendingVid = vid;
+    }
+
+    const res = await fetchSubs(vid);
+    if (!res.subs.length) {
+      console.warn('[Load] No subtitles found for', vid);
+      showToast('자막을 찾을 수 없습니다 (콘솔에서 상세 오류 확인)');
+      return;
+    }
+
+    console.log(`[Load] Loaded ${res.subs.length} subtitles, lang=${res.lang}`);
+    subs = res.subs; idx = 0; rptDone = 0;
+
+    const warn = document.getElementById('lang-warn');
+    if (!res.isEn) {
+      warn.textContent = `⚠ 감지 언어: ${res.lang} — 영어 자막이 아닐 수 있습니다`;
+      warn.classList.add('show');
+    } else { warn.classList.remove('show'); }
+
+    showPlayerUI();
+    renderSentence();
+    showToast(`자막 ${subs.length}개 로드 완료`);
+  } catch (err) {
+    console.error('[Load] Error:', err);
+    showToast('오류: ' + err.message);
+  } finally { setLoading(false); }
+}
+
+// ── Subtitle Fetching ──────────────────────────────
+async function fetchSubs(vid) {
+  console.log(`[Subs] Requesting /api/transcript?videoId=${vid}`);
+  const r = await fetch(`/api/transcript?videoId=${vid}`, {
+    signal: AbortSignal.timeout(20000)
+  });
+  const data = await r.json();
+  if (!r.ok) {
+    console.error('[Subs] Server error:', data.error);
+    throw new Error(data.error || '자막 로드 실패');
+  }
+  console.log(`[Subs] Received ${data.subs.length} segments`);
+  return { subs: data.subs, isEn: true, lang: 'en' };
+}
+
+// ── Playback ───────────────────────────────────────
+function onPlayBtn() {
+  if (!subs.length) return;
+  if (appState === 'idle') {
+    playCurrent();
+  } else if (appState === 'playing') {
+    stopWatch(); player.pauseVideo(); appState = 'idle';
+    setStatus('⏸', '일시정지됨'); setPlayBtn('p', '▶ 재생');
+  } else if (appState === 'paused') {
+    if (rptDone >= maxRpt) goNext(); else playCurrent();
+  }
+}
+
+function playCurrent() {
+  if (!playerReady || !subs[idx]) return;
+  const s = subs[idx];
+  stopWatch();
+  pendingStart = s.start; // onStateChange PLAYING 시 위치 확인 후 startWatch
+  player.seekTo(s.start, true);
+  player.playVideo();
+  appState = 'playing';
+  setStatus('🎧', '듣는 중...');
+  setPlayBtn('g', '⏸ 일시정지');
+}
+
+function startWatch() {
+  stopWatch();
+  const endTime = (subs[idx]?.end ?? 0) - 0.15; // pauseVideo 실행 딜레이 0.15초 선보정
+  if (endTime <= 0) return;
+  timerId = setInterval(() => {
+    if (!player || appState !== 'playing') return;
+    if (player.getCurrentTime() >= endTime) {
+      stopWatch();
+      player.pauseVideo();
+      appState = 'paused';
+      rptDone++;
+      updateDots();
+      if (rptDone >= maxRpt) {
+        setStatus('✅', '완료! 다음 문장으로 이동하세요');
+        setPlayBtn('s', '⏭ 다음 문장');
+      } else {
+        setStatus('🎤', `따라 말하고 재생하세요 (${rptDone}/${maxRpt})`);
+        setPlayBtn('a', '🔁 다시 듣기');
+      }
+    }
+  }, 30);
+}
+
+function stopWatch() {
+  if (timerId) { clearInterval(timerId); timerId = null; }
+}
+
+function goPrev() {
+  if (idx <= 0) { showToast('첫 번째 문장입니다'); return; }
+  idx--; rptDone = 0; appState = 'idle'; stopWatch(); renderSentence();
+}
+function goNext() {
+  if (idx >= subs.length - 1) { showToast('마지막 문장입니다'); return; }
+  idx++; rptDone = 0; appState = 'idle'; stopWatch(); renderSentence();
+}
+
+// ── UI ─────────────────────────────────────────────
+function renderSentence() {
+  if (!subs[idx]) return;
+  const el = document.getElementById('sentence-text');
+  el.classList.remove('fade-in');
+  void el.offsetWidth;
+  el.classList.add('fade-in');
+  el.textContent = subs[idx].text;
+  el.style.display = 'block';
+  document.getElementById('placeholder').classList.add('hidden');
+
+  setStatus('▶', '재생을 눌러 시작');
+  setPlayBtn('p', '▶ 재생');
+  updateDots();
+  updateProgress();
+
+  if (playerReady) { player.seekTo(subs[idx].start, true); player.pauseVideo(); }
+}
+
+function setStatus(icon, label) {
+  document.getElementById('s-icon').textContent = icon;
+  document.getElementById('s-label').textContent = label;
+}
+
+function setPlayBtn(style, label) {
+  const btn = document.getElementById('play-btn');
+  btn.textContent = label;
+  btn.className = `btn btn-${style}`;
+  btn.id = 'play-btn';
+}
+
+function updateDots() {
+  const c = document.getElementById('dots');
+  c.innerHTML = '';
+  for (let i = 0; i < maxRpt; i++) {
+    const d = document.createElement('div');
+    d.className = 'dot' + (i < rptDone ? ' on' : '');
+    c.appendChild(d);
+  }
+}
+
+function updateProgress() {
+  const cur = idx + 1, total = subs.length;
+  document.getElementById('prog-label').textContent = `${cur} / ${total}`;
+  document.getElementById('prog-fill').style.width = `${(cur / total) * 100}%`;
+}
+
+function buildPips() {
+  const c = document.getElementById('pips');
+  for (let i = 1; i <= 5; i++) {
+    const b = document.createElement('button');
+    b.className = 'pip' + (i === maxRpt ? ' on' : '');
+    b.textContent = i;
+    b.onclick = () => {
+      maxRpt = i;
+      document.querySelectorAll('.pip').forEach((el, j) => {
+        el.classList.toggle('on', j + 1 === i);
+      });
+      updateDots();
+    };
+    c.appendChild(b);
+  }
+}
+
+function showPlayerUI() {
+  document.getElementById('status-bar').style.display = 'flex';
+  document.getElementById('controls').style.display = 'flex';
+  document.getElementById('bottom-section').style.display = 'block';
+}
+
+function setLoading(on, msg) {
+  document.getElementById('loading').classList.toggle('show', on);
+  if (msg) document.getElementById('loading-msg').textContent = msg;
+}
+
+let toastTimer;
+function showToast(msg) {
+  const el = document.getElementById('toast');
+  el.textContent = msg; el.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('show'), 3000);
+}
+</script>
+<script src="https://www.youtube.com/iframe_api"></script>
+</body>
+</html>
