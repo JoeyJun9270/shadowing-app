@@ -101,13 +101,31 @@ app.get('/api/transcript', async (req, res) => {
     const timedtextUrl = `https://www.youtube.com/api/timedtext?${params}`;
 
     console.log(`[API] Fetching timedtext: ${timedtextUrl}`);
-    const subRes = await fetch(timedtextUrl, { signal: AbortSignal.timeout(10000) });
+    const subRes = await fetch(timedtextUrl, {
+      signal: AbortSignal.timeout(10000),
+      headers: {
+        'Accept-Language': 'en-US,en;q=0.9',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+      }
+    });
 
     if (!subRes.ok) {
       throw new Error(`timedtext 요청 실패: HTTP ${subRes.status}`);
     }
 
-    const subData = await subRes.json();
+    const subText = await subRes.text();
+    if (!subText || subText.length < 10) {
+      throw new Error(`timedtext 응답이 비어있습니다 (length=${subText?.length ?? 0})`);
+    }
+
+    let subData;
+    try {
+      subData = JSON.parse(subText);
+    } catch (e) {
+      console.error('[API] JSON 파싱 실패. 응답 앞 200자:', subText.slice(0, 200));
+      throw new Error(`자막 JSON 파싱 실패: ${e.message}`);
+    }
+
     const raw  = parseJson3(subData);
 
     if (!raw.length) {
