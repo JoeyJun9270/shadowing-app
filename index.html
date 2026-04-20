@@ -56,12 +56,7 @@
       transition: max-height 0.3s ease;
       flex-shrink: 0;
     }
-    #settings-panel.open { max-height: 180px; }
-    #server-key-notice {
-      font-size: 12px; color: var(--success);
-      padding: 10px 14px; display: none;
-    }
-    #server-key-notice.show { display: block; }
+    #settings-panel.open { max-height: 160px; }
     .panel-inner { padding: 13px 14px; }
     .field-label { font-size: 12px; color: var(--muted); margin-bottom: 7px; }
     .note { font-size: 11px; color: var(--muted); margin-top: 7px; }
@@ -243,14 +238,13 @@
 </header>
 
 <div id="settings-panel">
-  <div id="server-key-notice">✅ 서버에 API Key가 설정되어 있습니다 (입력 불필요)</div>
-  <div class="panel-inner" id="key-input-area">
-    <div class="field-label">YouTube Data API Key</div>
+  <div class="panel-inner">
+    <div class="field-label">YouTube Data API Key <span style="color:var(--muted);font-weight:400">(선택)</span></div>
     <div class="row">
       <input type="password" id="api-key-input" placeholder="AIza..." autocomplete="off" autocorrect="off" spellcheck="false">
       <button class="btn btn-p" onclick="saveKey()">저장</button>
     </div>
-    <div class="note">브라우저 localStorage에만 저장 · <a href="https://console.cloud.google.com/" target="_blank" style="color:var(--primary)">Google Cloud Console</a>에서 발급</div>
+    <div class="note">없어도 동작 · 있으면 자막 언어 정확도 향상 · <a href="https://console.cloud.google.com/" target="_blank" style="color:var(--primary)">Google Cloud Console</a>에서 발급</div>
   </div>
 </div>
 
@@ -338,28 +332,10 @@ let appState = 'idle'; // idle | playing | paused
 let timerId = null;
 
 // ── Boot ───────────────────────────────────────────
-document.addEventListener('DOMContentLoaded', async () => {
-  // 서버에 API Key 환경변수 있는지 확인
-  try {
-    const r = await fetch('/api/haskey');
-    const { hasKey } = await r.json();
-    if (hasKey) {
-      document.getElementById('server-key-notice').classList.add('show');
-      document.getElementById('key-input-area').style.display = 'none';
-    } else {
-      const k = localStorage.getItem('yt_api_key');
-      if (k) {
-        document.getElementById('api-key-input').value = k;
-      } else {
-        document.getElementById('settings-panel').classList.add('open');
-      }
-    }
-  } catch (_) {
-    // /api/haskey 실패 시 로컬 키 사용
-    const k = localStorage.getItem('yt_api_key');
-    if (k) document.getElementById('api-key-input').value = k;
-    else document.getElementById('settings-panel').classList.add('open');
-  }
+document.addEventListener('DOMContentLoaded', () => {
+  const k = localStorage.getItem('yt_api_key');
+  if (k) document.getElementById('api-key-input').value = k;
+  else document.getElementById('settings-panel').classList.add('open');
 
   document.getElementById('url-input').addEventListener('keydown', e => {
     if (e.key === 'Enter') handleLoad();
@@ -485,18 +461,121 @@ async function handleLoad() {
   } finally { setLoading(false); }
 }
 
-// ── Subtitle Fetching ──────────────────────────────
-async function fetchSubs(vid) {
-  const url = `/api/transcript?videoId=${vid}`;
-  console.log(`[Subs] Requesting transcript for ${vid}`);
-  const r = await fetch(url, { signal: AbortSignal.timeout(25000) });
-  const data = await r.json();
-  if (!r.ok) {
-    console.error('[Subs] Server error:', data.error);
-    throw new Error(data.error || '자막 로드 실패');
+// ── Subtitle Fetching (브라우저 직접 fetch) ──────────
+function parseJson3(data) {
+  if (!data?.events) return [];
+  return data.events
+    .filter(e => e.segs)
+    .map(e => ({
+      start: e.tStartMs / 1000,
+      end:   (e.tStartMs + Math.max(e.dDurationMs || 1000, 300)) / 1000,
+      text:  e.segs.map(s => s.utf8 || '').join('').replace(/\n/g, ' ').trim(),
+    }))
+    .filter(s => s.text.length > 0);
+}
+
+function groupSubtitles(items) {
+  const MIN_DUR = 1.5, MAX_DUR = 15;
+  const groups = [];
+  let buf = [];
+  const flush = () => {
+    if (!buf.length) return;
+    groups.push({
+      start: buf[0].start,
+      end:   buf[buf.length - 1].end,
+      text:  buf.map(s => s.text).join(' ').replace(/\s+/g, ' ').trim(),
+    });
+    buf = [];
+  };
+  for (const item of items) {
+    buf.push(item);
+    const dur  = buf[buf.length - 1].end - buf[0].start;
+    const text = buf.map(s => s.text).join(' ').trimEnd();
+    const endsOnSentence = /[.?!]["')\]]?$/.test(text);
+    if (dur >= MAX_DUR)                        flush();
+    else if (endsOnSentence && dur >= MIN_DUR) flush();
   }
-  console.log(`[Subs] Received ${data.subs.length} segments`);
-  return { subs: data.subs, isEn: true, lang: 'en' };
+  flush();
+  return groups;
+}
+
+async function proxyFetch(url) {
+  // corsproxy.io 로 브라우저에서 직접 fetch (Railway IP 우회)
+  const proxy = `https://corsproxy.io/?url=${encodeURIComponent(url)}`;
+  console.log('[Subs] proxy fetch:', url.slice(0, 80));
+  const r = await fetch(proxy, { signal: AbortSignal.timeout(15000) });
+  if (!r.ok) throw new Error(`프록시 HTTP ${r.status}`);
+  return r.text();
+}
+
+async function fetchSubs(vid) {
+  const apiKey = getKey();
+  let lang = 'en', isAsr = false;
+
+  // captions.list로 정확한 트랙 언어 확인 (API Key 있을 때)
+  if (apiKey) {
+    try {
+      console.log('[Subs] Fetching track list via captions.list...');
+      const r = await fetch(
+        `https://www.googleapis.com/youtube/v3/captions?part=snippet&videoId=${vid}&key=${apiKey}`,
+        { signal: AbortSignal.timeout(10000) }
+      );
+      const d = await r.json();
+      if (d.error) throw new Error(d.error.message);
+      const tracks = d.items ?? [];
+      console.log('[Subs] Tracks found:', tracks.length);
+      const en = tracks.find(t => t.snippet.language === 'en') ||
+                 tracks.find(t => t.snippet.language?.startsWith('en')) ||
+                 tracks[0];
+      if (en) {
+        lang  = en.snippet.language;
+        isAsr = en.snippet.trackKind === 'ASR';
+        console.log(`[Subs] Selected: lang=${lang}, kind=${en.snippet.trackKind}`);
+      }
+    } catch (e) {
+      console.warn('[Subs] captions.list failed:', e.message, '— using lang=en default');
+    }
+  } else {
+    console.log('[Subs] No API key — using lang=en default');
+  }
+
+  // timedtext URL 구성 후 corsproxy.io 경유 fetch
+  const params = new URLSearchParams({ v: vid, lang, fmt: 'json3' });
+  if (isAsr) params.set('kind', 'asr');
+  const timedtextUrl = `https://www.youtube.com/api/timedtext?${params}`;
+
+  let text;
+  try {
+    text = await proxyFetch(timedtextUrl);
+  } catch (e) {
+    throw new Error(`자막 fetch 실패: ${e.message}`);
+  }
+
+  if (!text || text.length < 10) {
+    // ASR 아니었으면 ASR 재시도
+    if (!isAsr) {
+      console.warn('[Subs] Empty response, retrying as ASR...');
+      params.set('kind', 'asr');
+      try { text = await proxyFetch(`https://www.youtube.com/api/timedtext?${params}`); }
+      catch (_) {}
+    }
+  }
+
+  if (!text || text.length < 10) throw new Error('자막 응답이 비어있습니다. 이 영상에 자막이 없을 수 있습니다.');
+
+  let data;
+  try { data = JSON.parse(text); }
+  catch (e) {
+    console.error('[Subs] JSON parse fail, preview:', text.slice(0, 200));
+    throw new Error('자막 파싱 실패');
+  }
+
+  const raw = parseJson3(data);
+  if (!raw.length) throw new Error('자막 내용이 없습니다');
+
+  const subs = groupSubtitles(raw);
+  console.log(`[Subs] Done: ${subs.length} segments, lang=${lang}`);
+  return { subs, isEn: lang.startsWith('en'), lang };
 }
 
 // ── Playback ───────────────────────────────────────
