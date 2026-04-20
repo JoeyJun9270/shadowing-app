@@ -18,7 +18,7 @@ function groupSubtitles(items) {
     groups.push({
       start: buf[0].start,
       end:   buf[buf.length - 1].end,
-      text:  buf.map(s => s.text).join(' ').replace(/\s+/g, ' ').trim(),
+      text:  buf.map(s => s.text).join(' ').replace(/\n/g, ' ').replace(/\s+/g, ' ').trim(),
     });
     buf = [];
   };
@@ -68,11 +68,11 @@ app.get('/api/transcript', async (req, res) => {
     console.log(`[API] Total items: ${transcript.length}`);
     console.log(`[API] First 3 raw:`, JSON.stringify(transcript.slice(0, 3)));
 
-    const raw = transcript.map(item => ({
-      start: item.start,
-      end:   item.start + Math.max(item.duration || 1, 0.3),
-      text:  item.text.replace(/\n/g, ' ').trim(),
-    })).filter(s => s.text.length > 0);
+    const raw = transcript.map(t => ({
+      text:  t.text.replace(/\n/g, ' ').trim(),
+      start: t.offset / 1000,
+      end:   (t.offset + t.duration) / 1000,
+    })).filter(t => t.text.length > 0);
 
     console.log(`[API] First 3 mapped:`, JSON.stringify(raw.slice(0, 3)));
 
