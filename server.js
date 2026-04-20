@@ -118,6 +118,6 @@ app.get('/api/transcript', async (req, res) => {
   }
 });
 
-app.listen(PORT, () => {
-  console.log(`YouTube Shadowing server running at http://localhost:${PORT}`);
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`YouTube Shadowing server running on port ${PORT}`);
 });
