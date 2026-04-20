@@ -8,6 +8,11 @@ const PORT = process.env.PORT || 3000;
 
 app.use(express.static(__dirname));
 
+// 서버에 API Key 설정 여부 확인
+app.get('/api/haskey', (req, res) => {
+  res.json({ hasKey: !!process.env.YOUTUBE_API_KEY });
+});
+
 function parseJson3(data) {
   if (!data?.events) return [];
   return data.events
@@ -50,7 +55,8 @@ function groupSubtitles(items) {
 }
 
 app.get('/api/transcript', async (req, res) => {
-  const { videoId, apiKey } = req.query;
+  const { videoId } = req.query;
+  const apiKey = req.query.apiKey || process.env.YOUTUBE_API_KEY;
 
   if (!videoId) {
     return res.status(400).json({ error: 'videoId 파라미터가 필요합니다' });
