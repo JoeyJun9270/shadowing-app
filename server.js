@@ -8,6 +8,79 @@ const PORT = process.env.PORT || 3000;
 
 app.use(express.static(__dirname));
 
+function groupSubtitles(items) {
+  const MIN_DUR = 1.5, MAX_DUR = 15;
+  const groups = [];
+  let buf = [];
+
+  const flush = () => {
+    if (!buf.length) return;
+    groups.push({
+      start: buf[0].start,
+      end:   buf[buf.length - 1].end,
+      text:  buf.map(s => s.text).join(' ').replace(/\s+/g, ' ').trim(),
+    });
+    buf = [];
+  };
+
+  for (const item of items) {
+    buf.push(item);
+    const dur  = buf[buf.length - 1].end - buf[0].start;
+    const text = buf.map(s => s.text).join(' ').trimEnd();
+    const endsOnSentence = /[.?!]["')\]]?$/.test(text);
+    if (dur >= MAX_DUR)                        flush();
+    else if (endsOnSentence && dur >= MIN_DUR) flush();
+  }
+  flush();
+  return groups;
+}
+
+app.get('/api/transcript', async (req, res) => {
+  const { videoId } = req.query;
+  if (!videoId) return res.status(400).json({ error: 'videoId 파라미터가 필요합니다' });
+
+  const apiKey = process.env.SUPADATA_API_KEY;
+  if (!apiKey) return res.status(500).json({ error: 'SUPADATA_API_KEY 환경변수가 설정되지 않았습니다' });
+
+  console.log(`[API] Fetching transcript: ${videoId}`);
+
+  try {
+    const url = `https://api.supadata.ai/v1/youtube/transcript?videoId=${videoId}&lang=en`;
+    const r = await fetch(url, {
+      headers: { 'x-api-key': apiKey },
+      signal: AbortSignal.timeout(15000),
+    });
+
+    if (!r.ok) {
+      const body = await r.text();
+      console.error(`[API] Supadata error ${r.status}:`, body.slice(0, 200));
+      throw new Error(`Supadata API 오류: HTTP ${r.status}`);
+    }
+
+    const data = await r.json();
+    const transcript = data.transcript ?? data.content ?? [];
+
+    if (!transcript.length) {
+      return res.status(404).json({ error: '자막을 찾을 수 없습니다' });
+    }
+
+    // Supadata 형식: { text, start(s), duration(s) }
+    const raw = transcript.map(item => ({
+      start: item.start,
+      end:   item.start + Math.max(item.duration || 1, 0.3),
+      text:  item.text.replace(/\n/g, ' ').trim(),
+    })).filter(s => s.text.length > 0);
+
+    const subs = groupSubtitles(raw);
+    console.log(`[API] Returning ${subs.length} segments`);
+    res.json({ subs });
+
+  } catch (err) {
+    console.error('[API] Error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`YouTube Shadowing server running on port ${PORT}`);
 });
