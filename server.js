@@ -9,7 +9,7 @@ const PORT = process.env.PORT || 3000;
 app.use(express.static(__dirname));
 
 function groupSubtitles(items) {
-  const MIN_DUR = 1.5, MAX_DUR = 15;
+  const MIN_DUR = 1, MAX_DUR = 6, COMMA_DUR = 4;
   const groups = [];
   let buf = [];
 
@@ -28,8 +28,10 @@ function groupSubtitles(items) {
     const dur  = buf[buf.length - 1].end - buf[0].start;
     const text = buf.map(s => s.text).join(' ').trimEnd();
     const endsOnSentence = /[.?!]["')\]]?$/.test(text);
+    const endsOnComma    = /,["')\]]?$/.test(text);
     if (dur >= MAX_DUR)                        flush();
     else if (endsOnSentence && dur >= MIN_DUR) flush();
+    else if (endsOnComma    && dur >= COMMA_DUR) flush();
   }
   flush();
   return groups;
