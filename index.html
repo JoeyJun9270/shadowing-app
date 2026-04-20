@@ -487,10 +487,7 @@ async function handleLoad() {
 
 // ── Subtitle Fetching ──────────────────────────────
 async function fetchSubs(vid) {
-  const apiKey = getKey();
-  if (!apiKey) throw new Error('API Key가 없습니다. 설정에서 YouTube API Key를 입력해주세요.');
-
-  const url = `/api/transcript?videoId=${vid}&apiKey=${encodeURIComponent(apiKey)}`;
+  const url = `/api/transcript?videoId=${vid}`;
   console.log(`[Subs] Requesting transcript for ${vid}`);
   const r = await fetch(url, { signal: AbortSignal.timeout(25000) });
   const data = await r.json();
