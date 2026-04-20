@@ -8,6 +8,25 @@ const PORT = process.env.PORT || 3000;
 
 app.use(express.static(__dirname));
 
+function splitLongItems(items) {
+  const MAX_ITEM = 6;
+  const result = [];
+  for (const item of items) {
+    const dur = item.end - item.start;
+    if (dur <= MAX_ITEM) { result.push(item); continue; }
+    // split on sentence boundaries, distribute time proportionally
+    const parts = item.text.match(/[^.!?]+[.!?]+["')\]]?/g) || [item.text];
+    const totalChars = parts.reduce((s, p) => s + p.length, 0);
+    let offset = item.start;
+    for (const part of parts) {
+      const partDur = dur * (part.length / totalChars);
+      result.push({ text: part.trim(), start: offset, end: offset + partDur });
+      offset += partDur;
+    }
+  }
+  return result;
+}
+
 function groupSubtitles(items) {
   const MIN_DUR = 1, MAX_DUR = 6, COMMA_DUR = 4;
   const groups = [];
@@ -78,7 +97,7 @@ app.get('/api/transcript', async (req, res) => {
 
     console.log(`[API] First 3 mapped:`, JSON.stringify(raw.slice(0, 3)));
 
-    const subs = groupSubtitles(raw);
+    const subs = groupSubtitles(splitLongItems(raw));
     console.log(`[API] Returning ${subs.length} segments`);
     res.json({ subs });
 
